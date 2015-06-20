@@ -1,0 +1,102 @@
+---
+title: "Prediction of exercise performance using biosensor data"
+author: "Fabien Deneuville"
+date: "Wednesday, June 18, 2015"
+output: html_document
+---
+
+```{r setoptions, echo=TRUE}
+library(knitr)
+library(RCurl)
+opts_chunk$set(echo=FALSE)
+```
+
+## SYNOPSIS
+
+This data analysis was made using the R programming language and the R studio user interface. The raw data used is coming from the Weight Lifting Exercise Dataset, available publicly. This report aims at summarizing the findings from the analysis of this database and showing the final model that was used to predict the exercise class from the existing data, using machine learning algorithm.
+
+## DATA PROCESSING
+
+```{r processing, echo=FALSE, cache=TRUE}
+library(RCurl)
+library(dplyr)
+library(caret)
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", destfile="exercisetraining.csv", method="curl")
+  trainingset<-read.table("exercisetraining.csv", sep=",", header=TRUE)
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", destfile="exercisetesting.csv", method="curl")
+  testingset<-read.table("exercisetesting.csv", sep=",", header=TRUE, na.strings="0")
+
+## Data cleaning : get rid of NA's
+
+trainingsetsmall<-trainingset[,colSums(is.na(trainingset))<1000]
+
+## Clean the factor variable to be replaced by numbers
+for (i in 1:dim(trainingsetsmall)[[2]]){
+  if (class(trainingsetsmall[,i])=="factor"){
+    trainingsetsmall[,i]<-as.numeric(trainingsetsmall[,i])
+  }
+}
+trainingsetsmall[,93]<-as.factor(trainingsetsmall[,93])
+## Clean the factor variable to be replaced by numbers and NA by 0
+for (i in 1:dim(testingset)[[2]]){
+  if (class(testingset[,i])=="logical"|class(testingset[,i])=="factor"){
+    testingset[,i]<-as.numeric(testingset[,i])
+  }
+  if (sum(is.na(testingset[,i]))>=5){
+    testingset[,i]<-0
+  }
+}
+
+```
+
+The data was downloaded as a csv file directly from the server (both training and testing set). Preprocessing was the following :
+- On the training data set, all columns showing more than 1000 NA values were removed. Each factor variable was replaced as a numeric variable EXCEPT for the classe variable that we are trying to predict
+- On the testing data set, the format was slightly different. Both logical and factor variables were transformed into numeric variable EXCEPT for the outcome variable classe that was kept as factor. Also, NA Values have been replaced with "0" in order to be consistent with the training data set.
+
+## EXPLORATORY DATA ANALYSIS
+
+```{r ploting2, echo=FALSE}
+library(caret)
+featurePlot(x=trainingsetsmall[,11:20], y=trainingsetsmall$classe)
+```
+
+Exploratory plots have been made in order to assess the impact of the different variables on the output classe.Each plot show about 10 variables a total of 9 plots have been made to look at the impact of the 90 variables. An example of plot is shown here.
+From this plot a first list of potential impactful variables has been made and was used for the generalized linear model.
+
+## GENERALIZED LINEAR MODEL
+
+The first model that was done was a generalized linear model. As the outcome variable is attribute, with different categories and the entry variables are mostly continuous this seemed to be the easiest model.
+The training data set was split into 2 subsets for cross validation, the first one containing 80% of the data for training and 20% was left over for cross validation.
+The model was created by selecting the variables from the exploratory plots only and it was then applied to the subset set apart for cross validation within the training set. Residual plot and confusion matrix were done to assess the effectiveness of the model.
+There is a lot of variability in the residual and the accuracy on the cross validation sample is not quite good (not much more than 50%). This shows that linear model might not be the most effective for this kind of categorical data that we are trying to predict.
+
+## RANDOM FOREST MODEL
+
+```{r model2, echo=FALSE}
+library(caret)
+## Create partition within the training set to do cross validation
+inTrain<-createDataPartition(y=trainingsetsmall$classe, p=0.15, list=FALSE)
+trainingsetsmall1<-trainingsetsmall[inTrain,]
+trainingsetsmalltest<-trainingsetsmall[-inTrain,]
+## Create model based on random forests, with small sample size 
+modFit<-train(classe~., data=trainingsetsmall1[,9:93], method="rf", prox=TRUE)
+## Predict values on small testing set in order to assess the model
+pred<-predict(modFit, trainingsetsmalltest)
+confusionMatrix(trainingsetsmalltest$classe, pred)
+```
+
+The second model was done with the random forest algorithm. It was done using all the variables of the cleaned data set (90 variables) omitting the first "label variables" (timestamp, date, etc...).
+In order to be able to compute it using the memory available, the model was done on a small chunk of the data. A partition was done and the model was done on 15% of the total available data for trainin. The rest of the training set was kept for cross validation.
+Within this configuration, the algorithm took about 15 minutes to run and create the model.
+The model was applied to the rest of the trianing set for crossvalidation (see matrix above). It shows about 5% of possible out of sample error with this model, which is much more acceptable than the previous model.
+Using cross validation, we can predict that the out of sample error with this model will be 5%.
+
+## RESULTS ON TESTING SET
+
+```{r predict, echo=FALSE}
+## Do the prediction on testing set
+answers<-predict(modFit, testingset)
+answers<-chartr("12345", "ABCDE", answers)
+```
+
+Finally, the random forest was applied to predict the values on the testing set. That provided a good accuracy (18 of the 20 variables were predicted right) regarding the small part of the data set that was used to train the model.
